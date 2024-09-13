@@ -1,0 +1,416 @@
+---
+title: "Portfolio Optimization Using Genetic Algorithm"
+author: "Deepali Yadav"
+date: "2024-02-25"
+output:
+  word_document: default
+  pdf_document: default
+---
+
+**Part 1**
+
+## Construction of a portfolio using the Genetic Algorithm package
+
+The purpose of the Assignment is to understand how Genetic Algorithm will be used for portfolio optimization.
+
+```{r ech=FALSE, include=FALSE, results='hide'}
+library(quantmod)
+library(PerformanceAnalytics)
+library(GA)
+library(corrplot)
+library(gridExtra)
+```
+
+A Portfolio which results in better returns and risk adjusted is built when there is diversification in the assets selected for the portfolio. The diversity contributes to healthy stock market. So, it is always recommended to choose stocks from different sectors. Choosing companies from different sector strengthen the portfolio returns and reduce the risk related to specific industry. As, part 1 of the assignment I have chosen 10 assets from the list of S&P 500 list top companies from various sector. Saving the selected assets in tickers variable and downloading the historical stock data using the "**Quantmod**" package in the tickers vector from Yahoo Finance.
+
+```{r echo=TRUE}
+tickers <- c("MSFT","AAPL","AMZN","NFLX", "NVDA", "META", "TSLA", "PG", "V", "JNJ")
+
+getSymbols(tickers,src="yahoo", from="2017-01-01", to="2017-12-31")
+
+```
+
+
+```{r }
+chartSeries(MSFT,name = "Microsoft Stock Price")
+chartSeries(AAPL,name = "Apple Stock Price")
+chartSeries(AMZN,name = "Amazon Stock Price")
+chartSeries(NFLX,name = "Netflix Stock Price")
+chartSeries(NVDA,name = "NVIDIA Stock Price")
+chartSeries(META,name = "Meta Stock Price")
+chartSeries(TSLA,name = "Tesla Stock Price")
+chartSeries(PG,name = "Procter & Gamble Stock Price")
+chartSeries(JNJ,name = "Johnson & J Stock Price")
+chartSeries(V,name = "Visa Stock Price")
+
+```
+
+For the optimization process the returns of the selected stocks is stored in a data-frame "**myRetData**".
+
+```{r ech=FALSE, include=FALSE, results='hide'}
+myRetData <- data.frame(as.xts(merge(dailyReturn(MSFT), dailyReturn(AAPL), dailyReturn(AMZN),dailyReturn(NVDA),dailyReturn(META),dailyReturn(TSLA),dailyReturn(PG),dailyReturn(V),dailyReturn(JNJ), dailyReturn(NFLX))))
+colnames(myRetData) <- tickers
+```
+
+To visualize the selected stocks better I have used the corrplot package to generate a heat-map that helps us understand the correlations of the stocks selected. Most of the stocks have negligible correlation with the other stocks because of being from different industry. This is useful to get a glimpse of how various stocks relate to each other.
+
+```{r echo=FALSE, out.width = "50%"}
+corrplot::corrplot(cor(myRetData),method = 'number')
+```
+
+Next step is to extract returns of the portfolio for which I have defined a function which returns weights of the stocks. Multiply the returns by the weights of the stocks which results in overall portfolio return.
+
+```{r ech=FALSE, include=FALSE, results='hide'}
+
+Portfolio_returns=function(x){
+  port.returns=0
+  
+  # multiply every asset by its weight
+  for (i in 1:length(x)) {
+    port.returns=port.returns+ myRetData[,i]* x[i]
+  }
+  return(port.returns)
+  
+}
+
+sharpe = function(x) {
+  port.returns = Portfolio_returns(x)
+  return(mean(port.returns) / sqrt(var(port.returns)))
+}
+
+constraint = function(x) {
+  boundary_constr = (sum(x) - 1) ^ 2  # This constraint enforces that the sum of weights equals 1
+  
+  for (i in 1:length(x)) {
+    boundary_constr = boundary_constr +
+      max(c(0, x[i] - 1)) ^ 2 +  # This constraint enforces that weights are between 0 and 1
+      max(c(0, -x[i])) ^ 2
+  }
+  
+  return (boundary_constr)
+} 
+
+obj = function(x) {
+  return (-sharpe(x) + 100 * constraint(x))
+}
+```
+
+For optimizing the portfolio the GA function will perform Genetic algorithm to find the optimal weights for the portfolio. The fitness function defined as -obj(x) typically aims to minimize the objective function and maximize the sharpe ratio
+
+```{r message=FALSE, ech=FALSE, include=FALSE, results='hide'}
+
+ga_result = ga(
+      
+      type="real-valued", 
+      function(x){-obj(x)}, 
+      lower = rep(0,ncol(myRetData)), 
+      upper = rep(1,ncol(myRetData)), 
+      maxiter = 10000, 
+      run=50, 
+      monitor=TRUE
+)
+
+```
+
+```{r echo=FALSE, ech=FALSE, results='hide'}
+# Storing the resulting weights in a vector
+sol = as.vector(summary(ga_result)$solution)
+cbind(names(myRetData), sol)
+```
+
+After GA obtains the optimal weights for my portfolio the below summary of the result displays the weights of the stocks in solution section
+
+```{r echo=FALSE}
+summary(ga_result)
+
+```
+
+```{r echo=FALSE}
+plot(ga_result)
+```
+
+```{r echo=FALSE}
+optimal_returns <- Portfolio_returns(sol)
+plot(cumsum(optimal_returns), type = "l", lwd = 2, col = "black", xlab = "Date", ylab = "Returns", main = "Portfolio Returns (2017)")
+```
+
+The below figure shows relationship between the annualized return and risk for each stock.This can help in visualizing the choice according to the risk tolerance and desired returns. Amazon, Apple, Microsoft, PG and Nvidia have reasonable risk with reasonable returns while, Netflix stands out with higher returns and higher risk. Conversely, Tesla and Visa have minimal risk but give in lower returns.
+
+```{r echo=FALSE}
+chart.RiskReturnScatter(myRetData,main = "Risk and return")
+```
+
+## Evaluation of the portfolio on unseen "future" data
+
+After the optimal weights are stored in a vector, the portfolios performance is evaluated by comparing it to other portfolios and observing its future performance.The optimal weights derived from GA for the year 2017 is used for the subsequent year, 2018. The visual representation of the year's graph shows that the returns for year 2018 declined as compared to the previous year 2017.
+
+```{r echo=TRUE}
+# Filtering data for the year 2018 (testing period)
+getSymbols(tickers,src ="yahoo",from="2018-01-01",to="2018-12-31",auto.assign = TRUE)
+```
+
+```{r echo=FALSE}
+
+myRetData_test <- data.frame(as.xts(merge(dailyReturn(MSFT), dailyReturn(AAPL), dailyReturn(AMZN),dailyReturn(NVDA),dailyReturn(META),dailyReturn(TSLA),dailyReturn(PG),dailyReturn(V),dailyReturn(JNJ), dailyReturn(NFLX))))
+
+colnames(myRetData_test) <- tickers
+
+Portfolio_returns_test=function(x){
+  port.return=0
+  
+  # multiply every asset by its weight
+  for (i in 1:length(x)) {
+    port.return=port.return+ myRetData_test[,i]* x[i]
+  }
+  return(port.return)
+  
+}
+
+Portfolio_ret_test <- Portfolio_returns_test(sol)
+
+plot(cumsum(Portfolio_ret_test), type = "l", lwd = 2, col = "black", xlab = "Date", ylab = "Returns", main = "Portfolio Returns - Test Period (2018)")
+```
+
+```{r echo=FALSE}
+chart.RiskReturnScatter(myRetData_test,main = "Risk and return")
+```
+
+## Comparison of the evolved portfolio with balanced and random portfolios
+
+```{r include=FALSE}
+# Balanced Weighted Portfolio
+num_assets <- length(tickers)
+even_weights <- rep(1/num_assets, num_assets)  # Equal weights for all assets
+
+# Calculating returns for Balanced weighted portfolio
+balanced_weighted_returns <- Portfolio_returns(even_weights)
+
+# Random Portfolio
+set.seed(123)  
+random_weights <- runif(num_assets)  # Generating random weights
+random_weights <- random_weights / sum(random_weights)  # Normalize to sum up to 1
+
+# Calculating returns for random portfolio
+random_portfolio_returns <- Portfolio_returns(random_weights)
+
+```
+
+All three portfolios seem to follow a similar upward trend over time, suggesting an increase in returns. However, there are variations in performance, with each portfolio taking turns in having the highest return at different times. The Random and balanced lines appear to finish slightly higher than the evolved line, indicating that the Random and Evenly Weighted Portfolios may have performed slightly better than the Evolved Portfolio by the end of the period shown.
+
+```{r echo=FALSE, dpi = 100}
+
+plot(cumsum(optimal_returns), type = "l", lwd = 2, col = "black", xlab = "", ylab = "Returns", main = "Comparing Blanced, Random and evolved portfolio")
+lines(cumsum(balanced_weighted_returns), type = "l", lwd = 2, col = "red")  # Balanced weighted portfolio
+lines(cumsum(random_portfolio_returns), type = "l", lwd = 2, col = "green")  # Random portfolio
+legend("topleft", inset = c(0, 0.05), legend=c("Evolved Portfolio", "Balanced Weighted Portfolio", "Random Portfolio"), col=c("black", "red", "green"), lwd=2, bty="n", y.intersp = 1.5)
+```
+
+The Sortino ratio measures the risk-adjusted return of a portfolio strategy by penalizing only those returns falling below a user-specified target or required rate of return. A higher Sortino ratio indicates better risk adjusted performance.
+
+The Evenly weighted portfolio has the lowest risk-adjusted return, it has higher downside volatility compared to the other portfolios although having higher returns. The random and evolved portfolio has the highest risk adjusted returns with very negligible difference
+
+```{r echo=FALSE}
+
+# Calculating the Sortino Ratio for each portfolio
+
+# Function to calculate Sortino ratio
+calculate_sortino_ratio <- function(returns, target_return) {
+  downside_returns <- returns[returns < target_return]
+  downside_volatility <- sd(downside_returns)
+  sortino_ratio <- (mean(returns) - target_return) / downside_volatility
+  return(sortino_ratio)
+}
+
+# Calculate Sortino ratio for Balanced weighted portfolio
+sortino_balanced_weighted <- calculate_sortino_ratio(balanced_weighted_returns, target_return = 0)
+
+# Calculate Sortino ratio for random portfolio
+sortino_random_portfolio <- calculate_sortino_ratio(random_portfolio_returns, target_return = 0)
+
+# Calculate Sortino ratio for optimal portfolio
+sortino_optimal <- calculate_sortino_ratio(optimal_returns, target_return = 0)
+
+cat("Sortino Ratio for Evenly Weighted Portfolio:", sortino_balanced_weighted, "\n")
+cat("Sortino Ratio for Random Portfolio:", sortino_random_portfolio, "\n")
+cat("Sortino Ratio for Optimal Portfolio:", sortino_optimal, "\n")
+```
+
+## Creation and evaluation of portfolios with differently balanced risk and return (to emulate a multi-objective approach)
+
+Previously the Portfolio_return function optimized the portfolio weights based on the sharpe ratio with constraints on weights for evaluation I'm modifying the optimization objective to include a balance between risk and return by calculating the Standard deviation and Mean (return) of portfolio returns.
+
+```{r include=FALSE}
+# Modify the objective function to balance risk and return
+balanced_obj <- function(x) {
+  port.returns <- Portfolio_returns(x)
+  port.sd <- sd(port.returns)  # Standard deviation (risk) of portfolio returns
+  port.mean <- mean(port.returns)  # Mean (return) of portfolio returns
+  return(-(port.mean / port.sd))  # Optimizing the ratio of return to risk (Sharpe ratio)
+}
+
+```
+
+```{r include=FALSE}
+# Modifying the genetic algorithm to optimize the balanced objective function
+ga_result_mod <- ga(
+  type = "real-valued", 
+  fitness = balanced_obj, 
+  lower = rep(0, ncol(myRetData)), 
+  upper = rep(1, ncol(myRetData)), 
+  maxiter = 10000, 
+  run = 50, 
+  monitor = TRUE
+)
+
+optimal_weights_mod <- as.vector(summary(ga_result_mod)$solution)
+```
+
+```{r echo=FALSE}
+summary(ga_result_mod)
+```
+
+
+## Evaluating performance of both the Genetic Algorithm's (Risk & Return)
+
+The GA 1 portfolio has a lower mean return (0.001507967) compared to the GA 2 evolved portfolio (0.002027437) so, the second portfolio provides better returns. When it comes to standard deviation(risk) of the portfolios the GA 1 portfolio has lower standard deviation (0.007546885) compared to the GA 2 portfolio (0.02203776). In summary, the first portfolio has lower returns and less risk than the second portfolio whereas, the second portfolio yields high returns but is more vulnerable.
+
+```{r echo=FALSE}
+#first GA result
+opt_returns <- Portfolio_returns(sol)
+opt_sd <- sd(opt_returns)
+opt_mean <- mean(opt_returns)
+
+print("GA 1")
+cat("Mean Return:", opt_mean, "\n")
+cat("Standard Deviation (Risk):", opt_sd, "\n")
+
+#second GA result after fitness function is modifies
+
+optimal_returns <- Portfolio_returns(optimal_weights_mod)
+optimal_sd <- sd(optimal_returns)
+optimal_mean <- mean(optimal_returns)
+
+print("GA 2")
+cat("Mean Return:", optimal_mean, "\n")
+cat("Standard Deviation (Risk):", optimal_sd, "\n")
+
+```
+
+As represented in the graph it is observable that the evolved portfolio outperforms with sharper increases and decline compared to the balanced and the random portfolio.
+
+```{r echo=FALSE}
+
+plot(cumsum(optimal_returns), type = "l", lwd = 2, col = "blue", xlab = "Date", ylab = "Returns", main = "Optimized Portfolio Returns")
+lines(cumsum(opt_returns), type = "l", lwd = 2, col = "black")  # optimized portfolio(GA1)
+lines(cumsum(balanced_weighted_returns), type = "l", lwd = 2, col = "red")  # balanced weighted portfolio
+lines(cumsum(random_portfolio_returns), type = "l", lwd = 2, col = "green")  # Random portfolio
+legend("topleft", inset = c(0, 0.05), legend=c("Evolved Portfolio", "Evenly Weighted Portfolio", "Random Portfolio", "GA 1"), col=c("blue", "red", "green", "black"), lwd=2, bty="n", y.intersp = 1.5)
+
+```
+
+```{r }
+# Plot mean return
+hist(optimal_returns, breaks = 20, col = "lightblue", main = "Distribution of Portfolio Returns", xlab = "Returns")
+abline(v = optimal_mean, col = "red", lwd = 2)
+legend("topright", legend = paste("Mean Return:", round(optimal_mean, 4)), col = "red", lwd = 2)
+```
+
+```{r }
+
+# Plot standard deviation (risk)
+boxplot(optimal_returns, col = "lightgreen", main = "Distribution of Portfolio Returns", ylab = "Returns")
+abline(h = optimal_sd, col = "blue", lwd = 2)
+legend("topright", legend = paste("Standard Deviation:", round(optimal_sd, 4)), col = "blue", lwd = 2)
+```
+
+**Part 2**
+
+## Using Genetic Algorithm's to select the assets
+
+For this part I manually selected 50 assets from the S&p 500 index stock list and tried to choose the best assets based on volatility of the assets
+
+```{r echo=TRUE}
+tickers2 <- c("TMUS", "CCI", "AMT", "SBAC", "EQIX", "AMT", "GS", "SPG", "BXP", "PSA", "PLD", "AVB", "ESS", "MAA", "COST", "WBA", "C", "BAC", "WFC", "PFE", "JPM", "CME", "ICE", "NDAQ", "LMT", "BA", "RTX", "GD", "CAT", "JPM", "KO", "INTC", "AMD", "CSCO", "ORCL", "IBM", "HPQ", "DELL", "XOM", "EXC", "DUK", "SO", "AEP", "XEL", "NEE", "DTE", "EIX", "SRE", "T", "VZ")
+```
+
+```{r include=FALSE}
+stock_env <- new.env()
+
+for (ticker in tickers2) {
+getSymbols(ticker, src = "yahoo", from = "2017-01-01", to = "2017-12-31", env = stock_env)
+}
+
+# Combine data into a single data frame
+myRetData2 <- do.call(merge, eapply(stock_env, Ad))
+
+
+myReturns <- diff(log(myRetData2), lag = 1)
+myReturns <- na.omit(myReturns)
+
+```
+
+```{r warning=FALSE, include=FALSE}
+# Define fitness function
+fitness <- function(x) {
+  portfolio_return <- rowSums(myRetData2 * x)
+  portfolio_volatility <- sqrt(var(portfolio_return)) * sqrt(252)
+  
+  # Calculate fitness
+  fitness_value <- portfolio_return / portfolio_volatility
+  
+  return(fitness_value)
+}
+
+```
+
+```{r warning=FALSE, include=FALSE}
+
+ga_result2 <- ga(type = "real-valued", fitness,
+                  lower = rep(0, ncol(myReturns)), 
+                  upper = rep(1, ncol(myReturns)),
+                  maxiter = 500, run = 50, monitor = TRUE, seed = 1)
+```
+
+Median value of the Stocks
+
+```{r include=FALSE}
+# Get optimal weights for selected stocks
+optimal_weights2 = as.vector(summary(ga_result2)$solution)
+selected_stock_indices <- which(optimal_weights2 > 0)  # Getting indices of selected stocks
+selected_tickers <- names(myRetData2)[selected_stock_indices]  # Getting tickers of selected stocks
+selected_weights <- optimal_weights2[selected_stock_indices]  # Getting weights of selected stocks
+cbind(selected_tickers, selected_weights)
+```
+
+```{r echo=FALSE}
+# Calculating volatility for each stock
+volatility <- apply(myRetData2, 2, function(x) {
+  sqrt(var(x)) * sqrt(252)
+})
+
+# Calculating median volatility
+median_volatility <- median(volatility)
+median_volatility
+
+```
+
+```{r echo=FALSE}
+# Filtering tickers based on volatility below or equal to the median
+tickers_below_median <- names(volatility[volatility <= median_volatility])
+
+# If there are fewer than or equal to 10 tickers below median volatility, print all
+if (length(tickers_below_median) <= 10) {
+  print(tickers_below_median)
+} else {
+  # Otherwise, print the top 10 tickers below median volatility
+  top_10_tickers_below_median <- head(tickers_below_median, 10)
+  print(top_10_tickers_below_median)
+}
+
+```
+
+## Conclusion
+
+The portfolio constructed using the Genetic Algorithm in part 1 resulted in having a high fitness value 0.1997912 compared to the fitness value of the portfolio generated with the modified fitness function (-0.09199833 ). The weights assigned to the stocks seems quite balanced reflecting portfolio's ability to generate returns while managing risk, as exhibited its performance on unseen data 
+
+The Sortino ratio (0.2333693) indicates favorable risk adjusted returns for the portfolio. 
